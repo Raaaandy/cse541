@@ -16,10 +16,7 @@ import argparse
 
 class Exp3Bandit:
     def __init__(self, arms, gamma=0.1):
-        """
-        arms: list of tuples, e.g., [(pde_co, bc_co, mse_co), ...]
-        gamma: 探索率 (0, 1]
-        """
+
         self.arms = arms
         self.num_arms = len(arms)
         self.gamma = gamma
@@ -27,19 +24,15 @@ class Exp3Bandit:
         self.probabilities = np.ones(self.num_arms) / self.num_arms
 
     def select_arm(self):
-        # 根据 Exp3 算法计算当前选择各摇臂的概率
         sum_weights = np.sum(self.weights)
         self.probabilities = (1.0 - self.gamma) * (self.weights / sum_weights) + (self.gamma / self.num_arms)
         
-        # 根据概率分布采样一个摇臂
         chosen_arm_index = np.random.choice(self.num_arms, p=self.probabilities)
         return chosen_arm_index, self.arms[chosen_arm_index]
 
     def update(self, chosen_arm_index, reward):
-        # 计算估计奖励
         estimated_reward = reward / self.probabilities[chosen_arm_index]
         
-        # 更新该摇臂的权重 (为防止溢出，可以对指数部分进行裁剪)
         exponent = (self.gamma * estimated_reward) / self.num_arms
         exponent = np.clip(exponent, -10, 10) 
         self.weights[chosen_arm_index] *= np.exp(exponent)
@@ -74,21 +67,11 @@ class FCN(nn.Module):
             self.fourier_mapping = FourierFeatureMapping(input_dim, fourier_mapping_size, fourier_scale)
             layers[0] = fourier_mapping_size
 
-        # self.activation = nn.Tanh()
-        # self.activation = nn.SiLU()
+
         self.activation = nn.GELU()
         self.loss_function = nn.MSELoss(reduction='sum')
         
-        # if use_conv and fourier_mapping_size:
-        #     # 添加1D卷积层处理Fourier特征
-        #     self.conv_layers = nn.Sequential(
-        #         nn.Conv1d(1, 32, kernel_size=3, padding=1),
-        #         nn.GELU(),
-        #         nn.Conv1d(32, 64, kernel_size=3, padding=1),
-        #         nn.GELU(),
-        #         nn.AdaptiveAvgPool1d(layers[1])  # 调整到第二层维度
-        #     )
-        #     layers[0] = layers[1]  # 卷积后的维度
+
         
         self.linears = nn.ModuleList([nn.Linear(layers[i], layers[i+1]) for i in range(len(layers)-1)])
         self.iter = 0
@@ -111,9 +94,7 @@ class FCN(nn.Module):
         if self.fourier_mapping is not None:
             a = self.fourier_mapping(a)
             
-        # 如果启用卷积，对Fourier特征进行1D卷积处理
         if self.use_conv and hasattr(self, 'conv_layers'):
-            # 将Fourier特征reshape为1D卷积输入: (batch, 1, features)
             a = a.unsqueeze(1)  # (N, 1, fourier_features)
             a = self.conv_layers(a)  # (N, 64, reduced_features)
             a = a.mean(dim=1)  # (N, reduced_features)
@@ -122,37 +103,14 @@ class FCN(nn.Module):
         for i in range(len(self.linears)-1):
             z = self.linears[i](a)
             a = self.activation(z)
-            # 添加残差连接，每3层一次
             if i == 2:  # 第3层保存residual
                 residual = a
             elif i == 5 and residual is not None:  # 第6层添加residual
                 a = a + residual
         a = self.linears[-1](a)
-        # g_phys = self.g_uv(x)
-        # g_norm = (g_phys - self.uvp_mean[0:2]) / self.uvp_std[0:2] if self.uvp_mean is not None and self.uvp_std is not None else g_phys
 
-        # l = self.l_xy(x)
-        # uvp_norm_hat = g_norm + l * a[:, 0:2]
-        # p_hat = a[:, 2:3]
-        # a = torch.cat([uvp_norm_hat, p_hat], dim=1)
         return a
 
-    def l_xy(self, x):
-    # x: (N,2) (x, y)
-        return (x[:,0:1] * (1 - x[:,0:1]) *
-                x[:,1:2] * (1 - x[:,1:2]))  # 形状 (N,1)
-    
-    def g_uv(self, x, eps=1e-3):
-        """
-        输入 x: (N,2) 张量
-        返回 g: (N,3) 张量，对应 [u_bc, v_bc, p_bc]
-        """
-        y = x[:,1:2]
-        top_mask = (y > 1 - eps).float()    # 只要 y 非常接近 1，就当作在顶壁
-        profile = y**2 * (3-2*y) * self.U_lid
-        u_bc =  top_mask * profile # 平滑过渡
-        v_bc = torch.zeros_like(u_bc)       # 整个边界 v=0
-        return torch.cat([u_bc, v_bc], dim=1)  # (N,2)
 
 
     def denormalize(self, data_normalized):
@@ -209,7 +167,6 @@ class FCN(nn.Module):
 
 
     def lossPDE(self, x_PDE, rho=1.0, nu=1/100, con_weight=1, x_weight=1, y_weight=1):
-        # 减少PDE计算点数来避免OOM
 
         g = x_PDE.clone().detach().to(next(self.parameters()).device)
         g.requires_grad = True  # Enable differentiation
@@ -430,13 +387,10 @@ def test_model(model, test_data, rho=1.0, nu=1/100, output_file="results.txt", p
     mask_y = np.isclose(test_data[:, 1], 0.5)
     subset_y = test_data[mask_y]
 
-    # 2. 根据第一列 (x 坐标) 进行排序
     sort_idx_y = np.argsort(subset_y[:, 0])
 
-    # 3. 得到排序后的数据
     test_data_y_sorted = subset_y[sort_idx_y]
 
-    # 4. 提取 u, v, p 三列
     test_data_y = test_data_y_sorted[:, 2:5]
 
     true_values = test_data[:, 2:5]  # u, v, p
